@@ -21,6 +21,12 @@ jobs:
           python-version: "3.11"
       - name: Install uv
         run: pip install uv==0.11.32
+      - name: Bundle Python the same way the installer does
+        run: |
+          uv python install 3.11 --install-dir pyinst
+          $src = Get-ChildItem pyinst -Directory | Where-Object { $_.Name -match '^cpython-3\.11\.\d+-windows-x86_64-none$' } | Select-Object -First 1
+          Copy-Item -Recurse $src.FullName python
+          if (-not (Test-Path python\python.exe)) { exit 1 }
       - name: First-run setup (same code path as Audiobooker.exe)
         run: python packaging\launcher.py --setup-only --headless
       - name: Make test PDFs

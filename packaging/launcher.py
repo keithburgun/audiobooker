@@ -22,7 +22,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox, ttk
 
-LAUNCHER_VERSION = "1"
+LAUNCHER_VERSION = "2"
 PYTHON_VERSION = "3.11"
 CHATTERBOX = "chatterbox-tts==0.1.7"
 CUDA_CHECK = ("import torch, sys; x = torch.ones(8, device='cuda') * 2; torch.cuda.synchronize(); "
@@ -45,6 +45,10 @@ RUNTIME = DATA / "runtime"
 VENV = RUNTIME / "venv"
 STAMP = RUNTIME / "installed.json"
 LOG = DATA / "logs" / "setup.log"
+# Python shipped inside the installer. Using it avoids `uv python install`,
+# whose folder junctions some Windows 11 security settings refuse to follow
+# ("untrusted mount point", os error 448).
+BUNDLED_PY = INSTALL_DIR / "python" / ("python.exe" if sys.platform == "win32" else "bin/python3")
 if sys.platform == "win32":
     PY = VENV / "Scripts" / "python.exe"
     PYW = VENV / "Scripts" / "pythonw.exe"
@@ -55,7 +59,8 @@ else:
 def spec_hash() -> str:
     h = hashlib.sha256()
     h.update(REQS.read_bytes() if REQS.exists() else b"")
-    h.update(f"{LAUNCHER_VERSION}|{PYTHON_VERSION}|{CHATTERBOX}".encode())
+    base = str(BUNDLED_PY) if BUNDLED_PY.exists() else PYTHON_VERSION
+    h.update(f"{LAUNCHER_VERSION}|{base}|{CHATTERBOX}".encode())
     return h.hexdigest()[:16]
 
 
@@ -247,12 +252,29 @@ class Setup:
                 shutil.rmtree(VENV, ignore_errors=True)
             STAMP.unlink(missing_ok=True)
 
-            self.set_step(0, f"Downloading Python {PYTHON_VERSION}…")
-            self.must([UV, "python", "install", PYTHON_VERSION], "download Python")
+            if BUNDLED_PY.exists():
+                python_arg = str(BUNDLED_PY)
+                self.log(f"Using bundled Python: {BUNDLED_PY}")
+                # A venv made from a different base Python (older version of
+                # this app, or a moved install) must be rebuilt.
+                cfg = VENV / "pyvenv.cfg"
+                if cfg.exists():
+                    home = next((l.split("=", 1)[1].strip() for l in cfg.read_text("utf-8", "replace").splitlines()
+                                 if l.strip().lower().startswith("home")), "")
+                    if Path(home).resolve() != BUNDLED_PY.parent.resolve() and \
+                            Path(home).resolve() != (BUNDLED_PY.parent / "bin").resolve():
+                        self.log(f"Rebuilding environment (was based on {home})")
+                        shutil.rmtree(VENV, ignore_errors=True)
+                # Leftovers from an earlier failed `uv python install`.
+                shutil.rmtree(RUNTIME / "python", ignore_errors=True)
+            else:
+                self.set_step(0, f"Downloading Python {PYTHON_VERSION}…")
+                self.must([UV, "python", "install", PYTHON_VERSION], "download Python")
+                python_arg = PYTHON_VERSION
 
             self.set_step(1, "Creating the runtime environment…")
             if not PY.exists():
-                self.must([UV, "venv", VENV, "--python", PYTHON_VERSION, "--seed"], "create the environment")
+                self.must([UV, "venv", VENV, "--python", python_arg, "--seed"], "create the environment")
 
             gpu = detect_nvidia()
             self.log(f"NVIDIA GPU: {gpu or 'none found'}")

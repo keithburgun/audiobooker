@@ -31,6 +31,7 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription
 [Files]
 Source: "..\dist\launcher\Audiobooker\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\dist\uv\uv.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\dist\python\*"; DestDir: "{app}\python"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "icon.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\app\audiobooker\*"; DestDir: "{app}\app\audiobooker"; Excludes: "__pycache__,*.pyc"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\app\requirements.txt"; DestDir: "{app}\app"; Flags: ignoreversion
