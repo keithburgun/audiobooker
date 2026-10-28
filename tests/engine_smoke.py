@@ -7,7 +7,9 @@ import sys
 import time
 from pathlib import Path
 
-from audiobooker import paths
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
+
+from audiobooker import paths  # noqa: E402
 
 paths.configure_model_cache()
 

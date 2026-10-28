@@ -36,17 +36,31 @@ jobs:
           & $py -m audiobooker cli ..\testpdfs\scanned_book.pdf --engine kokoro --voice bm_george --format mp3_chapters --chapters 2 --out ..\out
           if ($LASTEXITCODE -ne 0) { exit 1 }
           Get-ChildItem -Recurse ..\out
-      - name: One sentence from every engine (Chatterbox on CPU is slow but proves it works)
+      - name: One sentence from each engine (Chatterbox on CPU is slow but proves it works)
         working-directory: app
         run: |
           $py = "$env:AUDIOBOOKER_HOME\runtime\venv\Scripts\python.exe"
-          & $py ..\tests\engine_smoke.py kokoro chatterbox_turbo chatterbox
-          if ($LASTEXITCODE -ne 0) { exit 1 }
-          Copy-Item -Recurse engine_smoke ..\out\engine_smoke
+          $failed = $false
+          foreach ($e in @("kokoro", "chatterbox_turbo", "chatterbox")) {
+            cmd /c "`"$py`" ..\tests\engine_smoke.py $e > smoke_$e.log 2>&1"
+            $rc = $LASTEXITCODE
+            Get-Content "smoke_$e.log" -Tail 25
+            if ($rc -ne 0) {
+              $failed = $true
+              # Surface the tail of the log as annotations (readable via the API).
+              Get-Content "smoke_$e.log" -Tail 30 | ForEach-Object { if ($_.Trim()) { Write-Output "::error title=$e::$_" } }
+            }
+          }
+          New-Item -ItemType Directory -Force ..\out | Out-Null
+          if (Test-Path engine_smoke) { Copy-Item -Recurse -Force engine_smoke ..\out\engine_smoke }
+          Copy-Item smoke_*.log ..\out\
+          if ($failed) { exit 1 }
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: smoke-test-audio
           path: out
+          if-no-files-found: ignore
 
   build:
     needs: smoke-test
