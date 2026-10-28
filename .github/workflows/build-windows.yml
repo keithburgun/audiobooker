@@ -1,0 +1,71 @@
+name: Build Windows installer
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  smoke-test:
+    # Runs the real first-run setup on Windows (CPU PyTorch, since CI has no GPU),
+    # then narrates a test book with Kokoro and checks the outputs.
+    runs-on: windows-latest
+    env:
+      AUDIOBOOKER_HOME: ${{ github.workspace }}\abhome
+      AUDIOBOOKER_TORCH_INDEX: cpu
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install uv
+        run: pip install uv==0.11.32
+      - name: First-run setup (same code path as Audiobooker.exe)
+        run: python packaging\launcher.py --setup-only --headless
+      - name: Make test PDFs
+        run: |
+          $py = "$env:AUDIOBOOKER_HOME\runtime\venv\Scripts\python.exe"
+          & $py tests\make_test_pdfs.py testpdfs
+      - name: Narrate a test book with Kokoro (CPU) to M4B and per-chapter MP3
+        working-directory: app
+        run: |
+          $py = "$env:AUDIOBOOKER_HOME\runtime\venv\Scripts\python.exe"
+          & $py -m audiobooker cli ..\testpdfs\outline_book.pdf --engine kokoro --voice af_heart --format m4b --chapters 5 --out ..\out
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          & $py -m audiobooker cli ..\testpdfs\scanned_book.pdf --engine kokoro --voice bm_george --format mp3_chapters --chapters 2 --out ..\out
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Get-ChildItem -Recurse ..\out
+      - name: One sentence from every engine (Chatterbox on CPU is slow but proves it works)
+        working-directory: app
+        run: |
+          $py = "$env:AUDIOBOOKER_HOME\runtime\venv\Scripts\python.exe"
+          & $py ..\tests\engine_smoke.py kokoro chatterbox_turbo chatterbox
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Copy-Item -Recurse engine_smoke ..\out\engine_smoke
+      - uses: actions/upload-artifact@v4
+        with:
+          name: smoke-test-audio
+          path: out
+
+  build:
+    needs: smoke-test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+      - name: Build
+        run: powershell -ExecutionPolicy Bypass -File packaging\build_windows.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Audiobooker-installer
+          path: dist\Audiobooker-Setup-*.exe
+      - name: Attach to GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist\Audiobooker-Setup-*.exe
